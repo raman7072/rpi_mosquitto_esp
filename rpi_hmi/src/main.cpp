@@ -1,26 +1,24 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
-#include <QIcon>
 #include <QQuickStyle>
 #include "mqttclient.h"
 
 int main(int argc, char *argv[])
 {
-    // Enable High DPI scaling
-    QGuiApplication::setApplicationName("ThingSpeak ESP32 HMI");
+    // Application metadata
+    QGuiApplication::setApplicationName("Mosquitto ESP32 HMI");
     QGuiApplication::setOrganizationName("IoTProjects");
-    QGuiApplication::setApplicationVersion("1.0.0");
+    QGuiApplication::setApplicationVersion("2.0.0");
 
-    // Default to Basic / Fusion quick style for embedded systems if not set
+    // Default to Basic style for embedded Linux if not specified
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
         QQuickStyle::setStyle("Basic");
     }
 
     QGuiApplication app(argc, argv);
 
-    // Declare mqttClient BEFORE engine so engine is destroyed FIRST on exit,
-    // avoiding QML null property access warnings during teardown.
+    // Instantiate mqttClient BEFORE QQmlApplicationEngine so engine cleans up first
     MqttClient mqttClient;
 
     QQmlApplicationEngine engine;

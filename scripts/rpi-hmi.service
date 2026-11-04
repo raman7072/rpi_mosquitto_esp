@@ -1,5 +1,5 @@
 [Unit]
-Description=ThingSpeak ESP32 HMI on Raspberry Pi CM5 Lite
+Description=Mosquitto ESP32 HMI on Raspberry Pi CM5 Lite
 After=network-online.target
 Wants=network-online.target
 
@@ -18,4 +18,3 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-

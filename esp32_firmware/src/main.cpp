@@ -1,4 +1,3 @@
 // PlatformIO entry point
-// Includes the primary Arduino sketch logic
-#include "../esp32_mqtt_thingspeak/esp32_mqtt_thingspeak.ino"
-
+// Includes the primary Mosquitto MQTT Arduino sketch logic
+#include "../esp32_mqtt_mosquitto/esp32_mqtt_mosquitto.ino"

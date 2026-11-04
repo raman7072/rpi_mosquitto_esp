@@ -1,6 +1,6 @@
-# ThingSpeak MQTT Built-in LED Controller: Raspberry Pi CM5 Lite & ESP32
+# Mosquitto MQTT Built-in LED Controller: Raspberry Pi CM5 Lite & ESP32
 
-Complete end-to-end IoT solution to control the built-in LED of an **ESP32** from a **Qt Quick (QML) and modern C++ Human Machine Interface (HMI)** running on a **Raspberry Pi Compute Module 5 Lite (2GB RAM, Raspberry Pi OS Lite CLI)**, communicating over **MQTT** via the **ThingSpeak Cloud**.
+Complete end-to-end IoT solution to control the built-in LED of an **ESP32** from a **Qt Quick (QML) and modern C++ Human Machine Interface (HMI)** running on a **Raspberry Pi Compute Module 5 Lite (2GB RAM, Raspberry Pi OS Lite CLI)**, communicating over **MQTT** via a local **Mosquitto** broker hosted on an **Ubuntu PC**.
 
 ---
 
@@ -15,27 +15,28 @@ Complete end-to-end IoT solution to control the built-in LED of an **ESP32** fro
  │  │      [⚡ TURN ON LED]                   [⏹ TURN OFF LED]         │  │
  │  └───────────────────────────────┬──────────────────────────────────┘  │
  └──────────────────────────────────┼─────────────────────────────────────┘
-                                    │ MQTT Publish (QoS 0)
-                                    │ Topic: channels/<CHANNEL_ID>/publish
-                                    │ Payload: "field1=1" or "field1=0"
+                                    │ MQTT (Port 1883)
+                                    │ Publish:  esp32/led/set   ("ON" / "OFF")
+                                    │ Subscribe: esp32/led/status ("ON" / "OFF")
                                     ▼
-             ┌──────────────────────────────────────────────┐
-             │            ThingSpeak MQTT Cloud             │
-             │           (mqtt3.thingspeak.com)             │
-             └──────────────────────┬───────────────────────┘
-                                    │ MQTT Subscribe
-                                    │ Topic: channels/<CHANNEL_ID>/subscribe/fields/field1
-                                    │ Payload: "1" or "0"
+         ┌──────────────────────────────────────────────────────┐
+         │              Ubuntu PC (Local LAN)                   │
+         │  - Mosquitto MQTT Broker (port 1883)                 │
+         │  - Connected to ESP32 via USB (Flash & Serial Mon)   │
+         └──────────────────────────┬───────────────────────────┘
+                                    │ MQTT over Wi-Fi (Port 1883)
+                                    │ Subscribe: esp32/led/set
+                                    │ Publish:   esp32/led/status
                                     ▼
  ┌────────────────────────────────────────────────────────────────────────┐
  │                         ESP32 NodeMCU / DevKit                         │
  │  ┌──────────────────────────────────────────────────────────────────┐  │
  │  │ WiFiClient + PubSubClient Listener                               │  │
  │  │                                                                  │  │
- │  │   "1" ──► digitalWrite(LED_PIN, HIGH) ──► [💡 Built-in LED ON]   │  │
- │  │   "0" ──► digitalWrite(LED_PIN, LOW)  ──► [⭕ Built-in LED OFF]  │  │
+ │  │   "ON"  ──► digitalWrite(LED_PIN, HIGH) ──► [💡 Built-in LED ON]  │  │
+ │  │   "OFF" ──► digitalWrite(LED_PIN, LOW)  ──► [⭕ Built-in LED OFF] │  │
  │  └──────────────────────────────────────────────────────────────────┘  │
- │  Connected via USB to Ubuntu PC (for flashing & 115200 baud monitor)    │
+ │  Connected via USB to Ubuntu PC (for power & 115200 baud monitor)      │
  └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -45,10 +46,13 @@ Complete end-to-end IoT solution to control the built-in LED of an **ESP32** fro
 
 ```text
 mqtt_esp/
+├── mosquitto/
+│   ├── mosquitto.conf                  # Mosquitto broker configuration (0.0.0.0 bind)
+│   └── start_broker.sh                 # Launch script for broker on Ubuntu PC
 ├── esp32_firmware/
-│   ├── esp32_mqtt_thingspeak/
-│   │   └── esp32_mqtt_thingspeak.ino   # Arduino sketch for ESP32
-│   ├── platformio.ini                  # PlatformIO project config (for VSCode on Ubuntu)
+│   ├── esp32_mqtt_mosquitto/
+│   │   └── esp32_mqtt_mosquitto.ino    # Arduino sketch for ESP32
+│   ├── platformio.ini                  # PlatformIO project config (VSCode on Ubuntu)
 │   └── src/
 │       └── main.cpp                    # PlatformIO entry point
 ├── rpi_hmi/
@@ -57,9 +61,9 @@ mqtt_esp/
 │   ├── src/
 │   │   ├── main.cpp                    # App entry point & QML engine setup
 │   │   ├── mqttclient.h                # Standalone Qt C++ MQTT 3.1.1 client header
-│   │   └── mqttclient.cpp              # Protocol implementation over QTcpSocket/QSslSocket
+│   │   └── mqttclient.cpp              # Protocol implementation over QTcpSocket
 │   └── qml/
-│       └── Main.qml                    # Industrial touch HMI with 2 buttons & status
+│       └── Main.qml                    # Industrial touch HMI with 2 buttons & live status
 ├── scripts/
 │   ├── setup_rpi_lite.sh               # Auto-setup script for Raspberry Pi OS Lite
 │   ├── run_hmi.sh                      # Launch script with EGLFS / LinuxFB KMS detection
@@ -69,158 +73,147 @@ mqtt_esp/
 
 ---
 
-## ☁️ Step 1: ThingSpeak Cloud Setup
+## 🚀 Quick Start Guide
 
-ThingSpeak provides a free MQTT 3.1.1 broker at `mqtt3.thingspeak.com`.
+### Step 1: Configure & Start Mosquitto on Ubuntu PC
 
-### 1.1 Create a Channel
-1. Log in to [ThingSpeak](https://thingspeak.mathworks.com/).
-2. Navigate to **Channels** -> **My Channels** -> **New Channel**.
-3. Name: `ESP32 LED Controller`
-4. Enable **Field 1** and name it: `LED_State`
-5. Click **Save Channel**. Note down your numeric **Channel ID** (e.g. `2458901`).
+Ubuntu PC serves as the central MQTT Broker. By default, Mosquitto 2.0+ binds only to `localhost` (`127.0.0.1`). We provide a configuration file that opens port `1883` to local network devices (ESP32 and Raspberry Pi).
 
-### 1.2 Create MQTT Devices (Crucial Step!)
-> **Important Note on MQTT:** The MQTT protocol prohibits two active connections sharing the same `ClientID`. If the Raspberry Pi and ESP32 attempt to connect using the same Client ID, the broker will continuously disconnect them. You should create **two** MQTT Devices authorized on your channel:
-
-1. In ThingSpeak, go to **Devices** -> **MQTT Devices**.
-2. Click **Add a new device**:
-   - **Device 1 (For Raspberry Pi HMI):**
-     - Name: `RPi_CM5_HMI`
-     - Authorize Channel: Select your channel and grant **Write & Read** permission.
-     - Click **Add Device**.
-     - Download or copy the credentials:
-       - `Client ID`
-       - `Username`
-       - `Password`
-3. Click **Add a new device** again:
-   - **Device 2 (For ESP32):**
-     - Name: `ESP32_Device`
-     - Authorize Channel: Select your channel and grant **Read** permission.
-     - Click **Add Device**.
-     - Copy the credentials:
-       - `Client ID`
-       - `Username`
-       - `Password`
-
----
-
-## ⚡ Step 2: ESP32 Firmware Setup (on Ubuntu PC)
-
-Your ESP32 is plugged into the Ubuntu PC via USB.
-
-### 2.1 Set USB Serial Permissions on Ubuntu
-Add your Ubuntu user to the `dialout` group to allow flashing without root:
-```bash
-sudo usermod -a -G dialout $USER
-# Log out and log back in, or run 'newgrp dialout'
-```
-
-### 2.2 Configure Firmware Credentials
-Open `esp32_firmware/esp32_mqtt_thingspeak/esp32_mqtt_thingspeak.ino` and update:
-```cpp
-// 1. Wi-Fi credentials (2.4 GHz only)
-const char* WIFI_SSID     = "Your_WiFi_SSID";
-const char* WIFI_PASSWORD = "Your_WiFi_Password";
-
-// 2. ThingSpeak credentials
-const char* CHANNEL_ID     = "YOUR_NUMERIC_CHANNEL_ID";
-const char* MQTT_CLIENT_ID = "YOUR_ESP32_MQTT_CLIENT_ID";
-const char* MQTT_USERNAME  = "YOUR_ESP32_MQTT_USERNAME";
-const char* MQTT_PASSWORD  = "YOUR_ESP32_MQTT_PASSWORD";
-```
-
-### 2.3 Flash Using Arduino IDE
-1. Open the Arduino IDE on Ubuntu.
-2. Ensure ESP32 board support is installed (URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`).
-3. Install the **PubSubClient** library via **Tools -> Manage Libraries...**.
-4. Select your board: **ESP32 Dev Module** (or your specific ESP32 variant).
-5. Select Port: `/dev/ttyUSB0` or `/dev/ttyACM0`.
-6. Click **Upload**.
-7. Open Serial Monitor at **115200 baud** to see Wi-Fi and MQTT connection logs:
-   ```text
-   --- ESP32 ThingSpeak MQTT Receiver Initializing ---
-   [WiFi] Connected successfully! IP: 192.168.1.150
-   [MQTT] Connected to ThingSpeak Broker!
-   [MQTT] Subscribing to: channels/2458901/subscribe/fields/field1
-   [MQTT] Successfully subscribed! Waiting for commands from RPi HMI...
+1. **Install Mosquitto**:
+   ```bash
+   sudo apt update
+   sudo apt install -y mosquitto mosquitto-clients
    ```
 
-*(Alternatively, if using PlatformIO in VSCode on Ubuntu, run `pio run -t upload -d esp32_firmware`)*
+2. **Check your Ubuntu PC's IP Address**:
+   ```bash
+   hostname -I
+   ```
+   *(e.g., `192.168.1.100` — note this IP down, as both ESP32 and CM5 will connect to it!)*
+
+3. **Allow MQTT in Firewall (if UFW is active)**:
+   ```bash
+   sudo ufw allow 1883/tcp
+   ```
+
+4. **Start the Broker**:
+   Run the included startup script:
+   ```bash
+   chmod +x mosquitto/start_broker.sh
+   ./mosquitto/start_broker.sh
+   ```
+   *Alternatively, configure systemd mosquitto by copying the config:*
+   ```bash
+   sudo cp mosquitto/mosquitto.conf /etc/mosquitto/conf.d/local.conf
+   sudo systemctl restart mosquitto
+   ```
 
 ---
 
-## 🍓 Step 3: Raspberry Pi CM5 Lite Setup & Build
+### Step 2: Flash ESP32 Firmware
 
-The Raspberry Pi CM5 Lite runs **Raspberry Pi OS Lite (CLI)** without a bulky desktop environment. The HMI uses Qt Quick with the **EGLFS (KMS/DRM)** platform plugin to render directly to your connected display with full hardware acceleration.
+The ESP32 is plugged into the Ubuntu PC via USB for flashing and power, and connects to the Mosquitto broker via Wi-Fi.
 
-### 3.1 Automatic Setup Script
-Clone or copy the repository to your Raspberry Pi, then execute:
-```bash
-cd mqtt_esp/scripts
-chmod +x *.sh
-./setup_rpi_lite.sh
-```
-This script will:
-- Install Qt6 development tools and QML modules (`qt6-base-dev`, `qt6-declarative-dev`, `qml6-module-qtquick-controls`, etc.).
-- Add your user to the `video`, `render`, and `input` groups (required for KMS console graphics and touch/mouse input).
-- Compile the HMI executable in `rpi_hmi/build/rpi_esp_hmi`.
+#### Hardware Pinout
+- **Built-in LED**: GPIO 2 (Active HIGH on standard ESP-WROOM-32 / DevKit v1).
 
-### 3.2 Reboot or Re-login
-For group permissions to take effect:
-```bash
-sudo reboot
-```
+#### Option A: Flashing via Arduino IDE
+1. Open Arduino IDE on Ubuntu.
+2. Install the **ESP32** board package in Boards Manager (`esp32` by Espressif Systems).
+3. Install **PubSubClient** library via Library Manager (`PubSubClient` by Nick O'Leary).
+4. Open `esp32_firmware/esp32_mqtt_mosquitto/esp32_mqtt_mosquitto.ino`.
+5. Update your Wi-Fi credentials and Ubuntu PC IP:
+   ```cpp
+   const char* WIFI_SSID     = "Your_WiFi_Name";
+   const char* WIFI_PASSWORD = "Your_WiFi_Password";
+   const char* MQTT_BROKER   = "192.168.1.100"; // Ubuntu PC IP
+   ```
+6. Select your Board (**ESP32 Dev Module**) and Port (e.g., `/dev/ttyUSB0`).
+7. Click **Upload**, then open the **Serial Monitor** at **115200 baud** to confirm:
+   ```text
+   [WiFi] Connected successfully! IP: 192.168.1.105
+   [MQTT] Connecting to Mosquitto Broker at 192.168.1.100:1883 ... CONNECTED!
+   [MQTT] Subscribed to command topic: esp32/led/set
+   ```
 
-### 3.3 Launch the HMI on Raspberry Pi OS Lite
-From the console:
-```bash
-cd ~/mqtt_esp/scripts
-./run_hmi.sh
-```
-The script automatically configures:
-- `QT_QPA_PLATFORM=eglfs` (KMS/DRM hardware acceleration) with fallback to `linuxfb`.
-- `QT_QPA_GENERIC_PLUGINS=evdevtouch,evdevmouse,evdevkeyboard` for input devices.
-
----
-
-## 🖥️ Step 4: Operating the HMI
-
-When the HMI appears on the screen:
-
-1. Click **⚙ Settings**:
-   - Host: `mqtt3.thingspeak.com`
-   - Port: `1883`
-   - Channel ID: Your numeric ThingSpeak Channel ID
-   - MQTT Client ID: Device 1 Client ID (from ThingSpeak RPi Device)
-   - MQTT Username: Device 1 Username
-   - MQTT Password: Device 1 Password
-   - Click **Save**. Settings are automatically saved to disk via `QSettings`!
-2. Click **Connect**:
-   - The status pill will change to **CONNECTED** (Green).
-3. Control the ESP32:
-   - Click **⚡ TURN ON**: Publishes `field1=1`. The ESP32's built-in LED (GPIO 2) turns ON instantly.
-   - Click **⏹ TURN OFF**: Publishes `field1=0`. The ESP32's built-in LED turns OFF instantly.
-
-> **💡 ThingSpeak Rate Limiting:**
-> Free ThingSpeak accounts enforce a 15-second update interval per channel. The HMI includes an automatic cooldown timer that visually indicates the remaining seconds before the next command can be accepted by the cloud.
+#### Option B: Flashing via PlatformIO (VSCode)
+1. Open the repository root in VSCode.
+2. Edit `esp32_firmware/esp32_mqtt_mosquitto/esp32_mqtt_mosquitto.ino` with your Wi-Fi and PC IP.
+3. In PlatformIO toolbar, click **Build** and **Upload**.
+4. Open the Serial Monitor (`pio device monitor -b 115200`).
 
 ---
 
-## 🔄 Optional: Auto-Start HMI on Boot (systemd)
+### Step 3: Setup & Run HMI on Raspberry Pi CM5 Lite
 
-To make your Raspberry Pi CM5 boot directly into the HMI like a dedicated appliance:
+Raspberry Pi OS Lite runs without an X11/Wayland desktop. The Qt HMI is designed to render directly to the screen via **KMS/DRM** and **EGLFS** (hardware-accelerated OpenGL fullscreen) with fallback to **LinuxFB**.
 
+#### 3.1 Install Dependencies & Build
+On your Raspberry Pi CM5 Lite terminal:
 ```bash
-sudo cp ~/mqtt_esp/scripts/rpi-hmi.service /etc/systemd/system/
+# Clone the repository onto your Pi (or copy it over scp/sftp)
+git clone <your-repo-url> ~/mqtt_esp
+cd ~/mqtt_esp
+
+# Make setup script executable and run it
+chmod +x scripts/setup_rpi_lite.sh
+./scripts/setup_rpi_lite.sh
+```
+
+> **Important:** After running the script, log out and log back in (or `sudo reboot`) so the `video`, `render`, and `input` group permissions take effect for direct console display and touch input.
+
+#### 3.2 Launch the HMI
+```bash
+./scripts/run_hmi.sh
+```
+
+#### 3.3 Configure Broker IP in the HMI
+1. When the HMI appears on the screen, tap or click **⚙ Settings** (top-right).
+2. Enter the **Mosquitto Broker Host / IP** (e.g. `192.168.1.100`).
+3. Port: `1883`.
+4. Click **Save & Connect**.
+5. The badge will switch to green **BROKER CONNECTED**, and the **ESP32: ONLINE** indicator will activate.
+
+#### 3.4 Auto-Start HMI on Boot (systemd service)
+To run the HMI automatically every time the CM5 boots:
+```bash
+sudo cp scripts/rpi-hmi.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable rpi-hmi.service
 sudo systemctl start rpi-hmi.service
 ```
 
-To stop or disable:
+---
+
+## 🧪 Testing with Command-Line Tools
+
+You can verify the entire MQTT pipeline from any terminal on Ubuntu or Raspberry Pi:
+
+### Listen to LED Status Feedback:
 ```bash
-sudo systemctl stop rpi-hmi.service
-sudo systemctl disable rpi-hmi.service
+mosquitto_sub -h localhost -t "esp32/#" -v
 ```
 
+### Turn ON the ESP32 LED via CLI:
+```bash
+mosquitto_pub -h localhost -t "esp32/led/set" -m "ON"
+```
+*(ESP32 will light up its blue LED and publish `"esp32/led/status ON"`)*
+
+### Turn OFF the ESP32 LED via CLI:
+```bash
+mosquitto_pub -h localhost -t "esp32/led/set" -m "OFF"
+```
+*(ESP32 will extinguish its blue LED and publish `"esp32/led/status OFF"`)*
+
+---
+
+## 🛠️ Troubleshooting & Tips
+
+| Symptom | Cause | Solution |
+| :--- | :--- | :--- |
+| **HMI says "Connection refused"** | Mosquitto is only listening on localhost | Ensure `mosquitto/mosquitto.conf` has `listener 1883 0.0.0.0` and `allow_anonymous true`. |
+| **ESP32 keeps printing rc=-2** | ESP32 cannot reach Ubuntu PC IP | Ensure ESP32 and PC are on the same Wi-Fi subnet (2.4 GHz). Check Ubuntu firewall (`sudo ufw allow 1883/tcp`). |
+| **HMI displays black screen on CM5** | DRM/KMS permissions issue on OS Lite | Run `sudo usermod -a -G video,render,input $USER` and reboot. Fallback to `linuxfb` via `./scripts/run_hmi.sh`. |
+| **ESP32 LED logic inverted** | Some boards use active-LOW LEDs | In `esp32_mqtt_mosquitto.ino`, change `#define LED_ON LOW` and `#define LED_OFF HIGH`. |
+| **Multiple clients disconnecting** | Reusing the same MQTT `ClientID` | The HMI uses `rpi_cm5_hmi_<id>` and ESP32 uses `esp32_builtin_led`. Ensure both have distinct IDs. |

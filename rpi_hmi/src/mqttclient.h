@@ -2,11 +2,17 @@
 #define MQTTCLIENT_H
 
 #include <QObject>
-#include <QSslSocket>
+#include <QTcpSocket>
 #include <QTimer>
 #include <QByteArray>
 #include <QSettings>
 
+/**
+ * @brief Standalone lightweight MQTT 3.1.1 client implementation using QTcpSocket.
+ *
+ * Implements core MQTT protocol frames without external library dependencies,
+ * ensuring high portability on embedded Linux (e.g. Raspberry Pi OS Lite).
+ */
 class MqttClient : public QObject
 {
     Q_OBJECT
@@ -16,13 +22,13 @@ class MqttClient : public QObject
     Q_PROPERTY(QString clientId READ clientId WRITE setClientId NOTIFY clientIdChanged)
     Q_PROPERTY(QString username READ username WRITE setUsername NOTIFY usernameChanged)
     Q_PROPERTY(QString password READ password WRITE setPassword NOTIFY passwordChanged)
-    Q_PROPERTY(QString channelId READ channelId WRITE setChannelId NOTIFY channelIdChanged)
-    Q_PROPERTY(QString writeApiKey READ writeApiKey WRITE setWriteApiKey NOTIFY writeApiKeyChanged)
+    Q_PROPERTY(QString commandTopic READ commandTopic WRITE setCommandTopic NOTIFY commandTopicChanged)
+    Q_PROPERTY(QString statusTopic READ statusTopic WRITE setStatusTopic NOTIFY statusTopicChanged)
+    Q_PROPERTY(QString deviceStatusTopic READ deviceStatusTopic WRITE setDeviceStatusTopic NOTIFY deviceStatusTopicChanged)
     Q_PROPERTY(bool isConnected READ isConnected NOTIFY isConnectedChanged)
+    Q_PROPERTY(bool espOnline READ espOnline NOTIFY espOnlineChanged)
     Q_PROPERTY(int ledState READ ledState NOTIFY ledStateChanged)
-    Q_PROPERTY(int cooldownSeconds READ cooldownSeconds NOTIFY cooldownSecondsChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
-    Q_PROPERTY(bool subscribeFeedback READ subscribeFeedback WRITE setSubscribeFeedback NOTIFY subscribeFeedbackChanged)
     Q_PROPERTY(bool autoReconnect READ autoReconnect WRITE setAutoReconnect NOTIFY autoReconnectChanged)
 
 public:
@@ -44,28 +50,30 @@ public:
     QString password() const { return m_password; }
     void setPassword(const QString &password);
 
-    QString channelId() const { return m_channelId; }
-    void setChannelId(const QString &channelId);
+    QString commandTopic() const { return m_commandTopic; }
+    void setCommandTopic(const QString &topic);
 
-    QString writeApiKey() const { return m_writeApiKey; }
-    void setWriteApiKey(const QString &key);
+    QString statusTopic() const { return m_statusTopic; }
+    void setStatusTopic(const QString &topic);
+
+    QString deviceStatusTopic() const { return m_deviceStatusTopic; }
+    void setDeviceStatusTopic(const QString &topic);
 
     bool isConnected() const { return m_isConnected; }
-    int ledState() const { return m_ledState; }
-    int cooldownSeconds() const { return m_cooldownSeconds; }
+    bool espOnline() const { return m_espOnline; }
+    int ledState() const { return m_ledState; } // -1: unknown, 0: OFF, 1: ON
     QString statusMessage() const { return m_statusMessage; }
-
-    bool subscribeFeedback() const { return m_subscribeFeedback; }
-    void setSubscribeFeedback(bool subscribe);
 
     bool autoReconnect() const { return m_autoReconnect; }
     void setAutoReconnect(bool autoRec);
 
+    // QML Invocable controls
     Q_INVOKABLE void connectToBroker();
     Q_INVOKABLE void disconnectFromBroker();
     Q_INVOKABLE void turnOnLed();
     Q_INVOKABLE void turnOffLed();
-    Q_INVOKABLE void publishCustom(const QString &field, const QString &value);
+    Q_INVOKABLE void toggleLed();
+    Q_INVOKABLE void publishCustom(const QString &topic, const QString &payload);
     Q_INVOKABLE void loadSettings();
     Q_INVOKABLE void saveSettings();
 
@@ -75,13 +83,13 @@ signals:
     void clientIdChanged();
     void usernameChanged();
     void passwordChanged();
-    void channelIdChanged();
-    void writeApiKeyChanged();
+    void commandTopicChanged();
+    void statusTopicChanged();
+    void deviceStatusTopicChanged();
     void isConnectedChanged();
+    void espOnlineChanged();
     void ledStateChanged();
-    void cooldownSecondsChanged();
     void statusMessageChanged();
-    void subscribeFeedbackChanged();
     void autoReconnectChanged();
     void messageReceived(const QString &topic, const QString &payload);
 
@@ -91,42 +99,38 @@ private slots:
     void onSocketReadyRead();
     void onSocketError(QAbstractSocket::SocketError error);
     void sendPing();
-    void onCooldownTick();
     void onReconnectTimeout();
 
 private:
+    void setStatus(const QString &msg);
     void sendConnectPacket();
-    void sendPublishPacket(const QString &topic, const QString &payload);
+    void sendPublishPacket(const QString &topic, const QString &payload, bool retain = false);
     void sendSubscribePacket(const QString &topic);
     void sendDisconnectPacket();
     void parseIncomingPacket(quint8 type, quint8 flags, const QByteArray &data);
-    void setStatus(const QString &msg);
-    void startCooldown(int seconds = 15);
-    QString buildPublishTopic() const;
 
     static QByteArray encodeRemainingLength(int length);
     static QByteArray encodeString(const QString &str);
 
-    QSslSocket m_socket;
-    QByteArray m_rxBuffer;
+    QTcpSocket m_socket;
     QTimer m_pingTimer;
-    QTimer m_cooldownTimer;
     QTimer m_reconnectTimer;
+    QByteArray m_rxBuffer;
 
     QString m_host;
     int m_port;
     QString m_clientId;
     QString m_username;
     QString m_password;
-    QString m_channelId;
-    QString m_writeApiKey;
+    QString m_commandTopic;
+    QString m_statusTopic;
+    QString m_deviceStatusTopic;
 
     bool m_isConnected;
     bool m_userInitiatedDisconnect;
-    int m_ledState; // -1: Unknown, 0: OFF, 1: ON
-    int m_cooldownSeconds;
+    bool m_espOnline;
+    int m_ledState;
     QString m_statusMessage;
-    bool m_subscribeFeedback;
     bool m_autoReconnect;
     quint16 m_nextPacketId;
 };

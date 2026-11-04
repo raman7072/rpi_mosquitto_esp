@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Setup script for Raspberry Pi OS Lite (CLI) on Raspberry Pi CM5 Lite (2GB RAM)
-# Installs Qt6, build tools, graphics drivers, and configures permissions
+# Installs Qt6, build tools, Mesa DRM/KMS graphics drivers, and configures permissions
 # ==============================================================================
 
 set -e
@@ -26,7 +26,8 @@ sudo apt install -y \
     libdrm-dev \
     libgbm-dev \
     libinput-dev \
-    libxkbcommon-dev
+    libxkbcommon-dev \
+    mosquitto-clients
 
 echo "=== [3/4] Configuring Hardware & DRM Permissions ==="
 # Add current user to video, render, and input groups for DRM/KMS console access
@@ -51,4 +52,3 @@ echo ""
 echo " To run the HMI on your display from the CLI:"
 echo "   $PROJECT_ROOT/scripts/run_hmi.sh"
 echo "======================================================================"
-

@@ -1,45 +1,49 @@
 #include "mqttclient.h"
 #include <QDebug>
+#include <QRandomGenerator>
+#include <QDateTime>
 
 MqttClient::MqttClient(QObject *parent)
     : QObject(parent)
-    , m_host("mqtt3.thingspeak.com")
+    , m_host("192.168.1.100")
     , m_port(1883)
     , m_clientId("")
     , m_username("")
     , m_password("")
-    , m_channelId("")
-    , m_writeApiKey("")
+    , m_commandTopic("esp32/led/set")
+    , m_statusTopic("esp32/led/status")
+    , m_deviceStatusTopic("esp32/status")
     , m_isConnected(false)
     , m_userInitiatedDisconnect(false)
+    , m_espOnline(false)
     , m_ledState(-1)
-    , m_cooldownSeconds(0)
     , m_statusMessage("Ready to connect")
-    , m_subscribeFeedback(false)
     , m_autoReconnect(true)
     , m_nextPacketId(1)
 {
-    connect(&m_socket, &QSslSocket::connected, this, &MqttClient::onSocketConnected);
-    connect(&m_socket, &QSslSocket::disconnected, this, &MqttClient::onSocketDisconnected);
-    connect(&m_socket, &QSslSocket::readyRead, this, &MqttClient::onSocketReadyRead);
-    connect(&m_socket, &QSslSocket::errorOccurred, this, &MqttClient::onSocketError);
+    connect(&m_socket, &QTcpSocket::connected, this, &MqttClient::onSocketConnected);
+    connect(&m_socket, &QTcpSocket::disconnected, this, &MqttClient::onSocketDisconnected);
+    connect(&m_socket, &QTcpSocket::readyRead, this, &MqttClient::onSocketReadyRead);
+    connect(&m_socket, &QTcpSocket::errorOccurred, this, &MqttClient::onSocketError);
 
     connect(&m_pingTimer, &QTimer::timeout, this, &MqttClient::sendPing);
-
-    connect(&m_cooldownTimer, &QTimer::timeout, this, &MqttClient::onCooldownTick);
-    m_cooldownTimer.setInterval(1000);
 
     connect(&m_reconnectTimer, &QTimer::timeout, this, &MqttClient::onReconnectTimeout);
     m_reconnectTimer.setSingleShot(true);
 
     loadSettings();
+
+    // Ensure a unique client ID if none was loaded
+    if (m_clientId.trimmed().isEmpty()) {
+        m_clientId = QString("rpi_cm5_hmi_%1").arg(QRandomGenerator::global()->bounded(1000, 9999));
+        emit clientIdChanged();
+    }
 }
 
 MqttClient::~MqttClient()
 {
     m_reconnectTimer.stop();
     m_pingTimer.stop();
-    m_cooldownTimer.stop();
 
     if (m_isConnected) {
         sendDisconnectPacket();
@@ -88,27 +92,27 @@ void MqttClient::setPassword(const QString &password)
     }
 }
 
-void MqttClient::setChannelId(const QString &channelId)
+void MqttClient::setCommandTopic(const QString &topic)
 {
-    if (m_channelId != channelId) {
-        m_channelId = channelId;
-        emit channelIdChanged();
+    if (m_commandTopic != topic) {
+        m_commandTopic = topic;
+        emit commandTopicChanged();
     }
 }
 
-void MqttClient::setWriteApiKey(const QString &key)
+void MqttClient::setStatusTopic(const QString &topic)
 {
-    if (m_writeApiKey != key) {
-        m_writeApiKey = key;
-        emit writeApiKeyChanged();
+    if (m_statusTopic != topic) {
+        m_statusTopic = topic;
+        emit statusTopicChanged();
     }
 }
 
-void MqttClient::setSubscribeFeedback(bool subscribe)
+void MqttClient::setDeviceStatusTopic(const QString &topic)
 {
-    if (m_subscribeFeedback != subscribe) {
-        m_subscribeFeedback = subscribe;
-        emit subscribeFeedbackChanged();
+    if (m_deviceStatusTopic != topic) {
+        m_deviceStatusTopic = topic;
+        emit deviceStatusTopicChanged();
     }
 }
 
@@ -120,43 +124,25 @@ void MqttClient::setAutoReconnect(bool autoRec)
     }
 }
 
-QString MqttClient::buildPublishTopic() const
-{
-    QString base = QString("channels/%1/publish").arg(m_channelId.trimmed());
-    if (!m_writeApiKey.trimmed().isEmpty()) {
-        return QString("%1/%2").arg(base, m_writeApiKey.trimmed());
-    }
-    return base;
-}
-
 void MqttClient::connectToBroker()
 {
     m_userInitiatedDisconnect = false;
     m_reconnectTimer.stop();
 
     if (m_isConnected) {
-        setStatus("Already connected.");
+        setStatus("Already connected to Mosquitto broker.");
         return;
     }
 
-    if (m_channelId.trimmed().isEmpty()) {
-        setStatus("Error: Channel ID cannot be empty.");
-        return;
-    }
-
-    if (m_clientId.trimmed().isEmpty()) {
-        setStatus("Error: MQTT Device Client ID required.");
+    if (m_host.trimmed().isEmpty()) {
+        setStatus("Error: Broker Host / IP cannot be empty.");
         return;
     }
 
     m_rxBuffer.clear();
-    setStatus(QString("Connecting to %1:%2...").arg(m_host).arg(m_port));
+    setStatus(QString("Connecting to Mosquitto at %1:%2...").arg(m_host).arg(m_port));
 
-    if (m_port == 8883) {
-        m_socket.connectToHostEncrypted(m_host, static_cast<quint16>(m_port));
-    } else {
-        m_socket.connectToHost(m_host, static_cast<quint16>(m_port));
-    }
+    m_socket.connectToHost(m_host.trimmed(), static_cast<quint16>(m_port));
 }
 
 void MqttClient::disconnectFromBroker()
@@ -183,61 +169,48 @@ void MqttClient::disconnectFromBroker()
 void MqttClient::turnOnLed()
 {
     if (!m_isConnected) {
-        setStatus("Cannot send command: Broker not connected! Reconnecting...");
+        setStatus("Broker not connected. Attempting reconnection...");
         connectToBroker();
         return;
     }
 
-    if (m_cooldownSeconds > 0) {
-        setStatus(QString("ThingSpeak Rate Limit: Please wait %1s before next update.").arg(m_cooldownSeconds));
-        return;
-    }
-
-    QString topic = buildPublishTopic();
-    QString payload = "field1=1&status=MQTTPUBLISH";
-
-    sendPublishPacket(topic, payload);
+    sendPublishPacket(m_commandTopic.trimmed(), "ON");
     m_ledState = 1;
     emit ledStateChanged();
-    startCooldown(15);
-    setStatus(QString("LED ON command published to ThingSpeak (%1)").arg(topic));
+    setStatus(QString("[%1] Sent 'ON' to %2").arg(QDateTime::currentDateTime().toString("hh:mm:ss"), m_commandTopic));
 }
 
 void MqttClient::turnOffLed()
 {
     if (!m_isConnected) {
-        setStatus("Cannot send command: Broker not connected! Reconnecting...");
+        setStatus("Broker not connected. Attempting reconnection...");
         connectToBroker();
         return;
     }
 
-    if (m_cooldownSeconds > 0) {
-        setStatus(QString("ThingSpeak Rate Limit: Please wait %1s before next update.").arg(m_cooldownSeconds));
-        return;
-    }
-
-    QString topic = buildPublishTopic();
-    QString payload = "field1=0&status=MQTTPUBLISH";
-
-    sendPublishPacket(topic, payload);
+    sendPublishPacket(m_commandTopic.trimmed(), "OFF");
     m_ledState = 0;
     emit ledStateChanged();
-    startCooldown(15);
-    setStatus(QString("LED OFF command published to ThingSpeak (%1)").arg(topic));
+    setStatus(QString("[%1] Sent 'OFF' to %2").arg(QDateTime::currentDateTime().toString("hh:mm:ss"), m_commandTopic));
 }
 
-void MqttClient::publishCustom(const QString &field, const QString &value)
+void MqttClient::toggleLed()
+{
+    if (m_ledState == 1) {
+        turnOffLed();
+    } else {
+        turnOnLed();
+    }
+}
+
+void MqttClient::publishCustom(const QString &topic, const QString &payload)
 {
     if (!m_isConnected) {
         setStatus("Cannot publish: Broker not connected!");
         return;
     }
 
-    QString topic = buildPublishTopic();
-    QString payload = QString("%1=%2&status=MQTTPUBLISH").arg(field, value);
-
     sendPublishPacket(topic, payload);
-    startCooldown(15);
     setStatus(QString("Published '%1' to %2").arg(payload, topic));
 }
 
@@ -270,8 +243,12 @@ void MqttClient::onSocketError(QAbstractSocket::SocketError error)
     m_isConnected = false;
     emit isConnectedChanged();
 
-    if (error == QAbstractSocket::RemoteHostClosedError) {
-        setStatus("Remote host closed connection. (Note: Ensure ESP32 and HMI use different Client IDs in ThingSpeak!)");
+    if (error == QAbstractSocket::ConnectionRefusedError) {
+        setStatus("Connection refused. Is Mosquitto running and configured to listen on 0.0.0.0?");
+    } else if (error == QAbstractSocket::HostNotFoundError) {
+        setStatus(QString("Host '%1' not found. Check IP address.").arg(m_host));
+    } else if (error == QAbstractSocket::RemoteHostClosedError) {
+        setStatus("Broker closed connection. Ensure client IDs are unique!");
     } else {
         setStatus(QString("Network Error: %1").arg(m_socket.errorString()));
     }
@@ -284,7 +261,7 @@ void MqttClient::onSocketError(QAbstractSocket::SocketError error)
 void MqttClient::onReconnectTimeout()
 {
     if (!m_isConnected && !m_userInitiatedDisconnect) {
-        qDebug() << "[ThingSpeak HMI] Attempting automatic reconnection...";
+        qDebug() << "[Mosquitto HMI] Attempting automatic reconnection...";
         connectToBroker();
     }
 }
@@ -298,29 +275,11 @@ void MqttClient::sendPing()
     }
 }
 
-void MqttClient::onCooldownTick()
-{
-    if (m_cooldownSeconds > 0) {
-        m_cooldownSeconds--;
-        emit cooldownSecondsChanged();
-        if (m_cooldownSeconds == 0) {
-            m_cooldownTimer.stop();
-        }
-    }
-}
-
-void MqttClient::startCooldown(int seconds)
-{
-    m_cooldownSeconds = seconds;
-    emit cooldownSecondsChanged();
-    m_cooldownTimer.start();
-}
-
 void MqttClient::setStatus(const QString &msg)
 {
     m_statusMessage = msg;
     emit statusMessageChanged();
-    qDebug() << "[ThingSpeak HMI]" << msg;
+    qDebug() << "[Mosquitto HMI]" << msg;
 }
 
 QByteArray MqttClient::encodeRemainingLength(int length)
@@ -386,13 +345,18 @@ void MqttClient::sendConnectPacket()
     m_socket.flush();
 }
 
-void MqttClient::sendPublishPacket(const QString &topic, const QString &payload)
+void MqttClient::sendPublishPacket(const QString &topic, const QString &payload, bool retain)
 {
     QByteArray varHeader = encodeString(topic);
     QByteArray payloadBytes = payload.toUtf8();
 
+    quint8 headerByte = 0x30; // PUBLISH QoS 0
+    if (retain) {
+        headerByte |= 0x01;
+    }
+
     QByteArray packet;
-    packet.append(static_cast<char>(0x30)); // PUBLISH QoS 0
+    packet.append(static_cast<char>(headerByte));
     packet.append(encodeRemainingLength(varHeader.size() + payloadBytes.size()));
     packet.append(varHeader);
     packet.append(payloadBytes);
@@ -422,7 +386,7 @@ void MqttClient::sendSubscribePacket(const QString &topic)
 
     m_socket.write(packet);
     m_socket.flush();
-    qDebug() << "Sent SUBSCRIBE to" << topic;
+    qDebug() << "[Mosquitto HMI] Subscribed to topic:" << topic;
 }
 
 void MqttClient::sendDisconnectPacket()
@@ -453,7 +417,7 @@ void MqttClient::onSocketReadyRead()
             remLen += (digit & 127) * multiplier;
             multiplier *= 128;
             if (multiplier > 128 * 128 * 128) {
-                // Malformed remaining length
+                // Malformed packet
                 m_rxBuffer.clear();
                 return;
             }
@@ -461,7 +425,7 @@ void MqttClient::onSocketReadyRead()
 
         int totalPacketSize = offset + remLen;
         if (m_rxBuffer.size() < totalPacketSize) {
-            return; // Wait for full packet
+            return; // Incomplete packet, wait for more chunks
         }
 
         QByteArray packetData = m_rxBuffer.mid(offset, remLen);
@@ -481,11 +445,14 @@ void MqttClient::parseIncomingPacket(quint8 type, quint8 flags, const QByteArray
                 m_isConnected = true;
                 emit isConnectedChanged();
                 m_pingTimer.start(25000);
-                setStatus("Connected to ThingSpeak MQTT Broker!");
+                setStatus("Connected to Mosquitto Broker successfully!");
 
-                if (m_subscribeFeedback && !m_channelId.trimmed().isEmpty()) {
-                    QString subTopic = QString("channels/%1/subscribe/fields/field1").arg(m_channelId.trimmed());
-                    sendSubscribePacket(subTopic);
+                // Automatically subscribe to status topics
+                if (!m_statusTopic.trimmed().isEmpty()) {
+                    sendSubscribePacket(m_statusTopic.trimmed());
+                }
+                if (!m_deviceStatusTopic.trimmed().isEmpty()) {
+                    sendSubscribePacket(m_deviceStatusTopic.trimmed());
                 }
             } else {
                 QString err = "Connection rejected: ";
@@ -502,16 +469,7 @@ void MqttClient::parseIncomingPacket(quint8 type, quint8 flags, const QByteArray
             }
         }
     } else if (type == 9) { // SUBACK
-        if (data.size() >= 3) {
-            quint8 returnCode = static_cast<quint8>(data[2]);
-            if (returnCode == 0x80) {
-                setStatus("Subscription failed (Code 0x80 - Not Authorized to read channel).");
-            } else {
-                setStatus("Subscribed to channel updates.");
-            }
-        } else {
-            setStatus("Subscribed to channel updates.");
-        }
+        setStatus("Subscribed to MQTT topics successfully.");
     } else if (type == 3) { // PUBLISH
         if (data.size() >= 2) {
             quint16 topicLen = (static_cast<quint8>(data[0]) << 8) | static_cast<quint8>(data[1]);
@@ -533,34 +491,49 @@ void MqttClient::parseIncomingPacket(quint8 type, quint8 flags, const QByteArray
                 QString payload = QString::fromUtf8(data.mid(payloadOffset)).trimmed();
                 emit messageReceived(topic, payload);
 
-                // Update LED state if message is from our subscribed field
-                if (payload == "1" || payload.toUpper() == "ON" || payload.contains("field1=1")) {
-                    m_ledState = 1;
-                    emit ledStateChanged();
-                    setStatus("Cloud sync: LED is ON (field1=1)");
-                } else if (payload == "0" || payload.toUpper() == "OFF" || payload.contains("field1=0")) {
-                    m_ledState = 0;
-                    emit ledStateChanged();
-                    setStatus("Cloud sync: LED is OFF (field1=0)");
+                // LED state feedback from ESP32
+                if (topic == m_statusTopic.trimmed()) {
+                    if (payload.compare("ON", Qt::CaseInsensitive) == 0 || payload == "1") {
+                        m_ledState = 1;
+                        emit ledStateChanged();
+                        setStatus(QString("[%1] ESP32 Feedback: LED is ON").arg(QDateTime::currentDateTime().toString("hh:mm:ss")));
+                    } else if (payload.compare("OFF", Qt::CaseInsensitive) == 0 || payload == "0") {
+                        m_ledState = 0;
+                        emit ledStateChanged();
+                        setStatus(QString("[%1] ESP32 Feedback: LED is OFF").arg(QDateTime::currentDateTime().toString("hh:mm:ss")));
+                    }
+                }
+
+                // ESP32 device online/offline status (LWT)
+                if (topic == m_deviceStatusTopic.trimmed()) {
+                    if (payload.compare("online", Qt::CaseInsensitive) == 0) {
+                        m_espOnline = true;
+                        emit espOnlineChanged();
+                        setStatus("ESP32 Device is ONLINE");
+                    } else if (payload.compare("offline", Qt::CaseInsensitive) == 0) {
+                        m_espOnline = false;
+                        emit espOnlineChanged();
+                        setStatus("ESP32 Device is OFFLINE");
+                    }
                 }
             }
         }
     } else if (type == 13) { // PINGRESP
-        // Ping response received successfully
+        // Keep-alive acknowledged
     }
 }
 
 void MqttClient::loadSettings()
 {
-    QSettings settings("IoTProjects", "ThingSpeakHMI");
-    m_host = settings.value("host", "mqtt3.thingspeak.com").toString();
+    QSettings settings("IoTProjects", "MosquittoEspHmi");
+    m_host = settings.value("host", "192.168.1.100").toString();
     m_port = settings.value("port", 1883).toInt();
     m_clientId = settings.value("clientId", "").toString();
     m_username = settings.value("username", "").toString();
     m_password = settings.value("password", "").toString();
-    m_channelId = settings.value("channelId", "").toString();
-    m_writeApiKey = settings.value("writeApiKey", "").toString();
-    m_subscribeFeedback = settings.value("subscribeFeedback", false).toBool();
+    m_commandTopic = settings.value("commandTopic", "esp32/led/set").toString();
+    m_statusTopic = settings.value("statusTopic", "esp32/led/status").toString();
+    m_deviceStatusTopic = settings.value("deviceStatusTopic", "esp32/status").toString();
     m_autoReconnect = settings.value("autoReconnect", true).toBool();
 
     emit hostChanged();
@@ -568,23 +541,23 @@ void MqttClient::loadSettings()
     emit clientIdChanged();
     emit usernameChanged();
     emit passwordChanged();
-    emit channelIdChanged();
-    emit writeApiKeyChanged();
-    emit subscribeFeedbackChanged();
+    emit commandTopicChanged();
+    emit statusTopicChanged();
+    emit deviceStatusTopicChanged();
     emit autoReconnectChanged();
 }
 
 void MqttClient::saveSettings()
 {
-    QSettings settings("IoTProjects", "ThingSpeakHMI");
+    QSettings settings("IoTProjects", "MosquittoEspHmi");
     settings.setValue("host", m_host);
     settings.setValue("port", m_port);
     settings.setValue("clientId", m_clientId);
     settings.setValue("username", m_username);
     settings.setValue("password", m_password);
-    settings.setValue("channelId", m_channelId);
-    settings.setValue("writeApiKey", m_writeApiKey);
-    settings.setValue("subscribeFeedback", m_subscribeFeedback);
+    settings.setValue("commandTopic", m_commandTopic);
+    settings.setValue("statusTopic", m_statusTopic);
+    settings.setValue("deviceStatusTopic", m_deviceStatusTopic);
     settings.setValue("autoReconnect", m_autoReconnect);
     setStatus("Settings saved successfully.");
 }

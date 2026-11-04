@@ -7,7 +7,7 @@ ApplicationWindow {
     visible: true
     width: 800
     height: 520
-    title: "ESP32 Controller - Raspberry Pi CM5 Lite HMI"
+    title: "ESP32 LED Controller - Raspberry Pi CM5 Lite HMI"
     color: "#121820"
 
     // High contrast modern dark palette
@@ -17,7 +17,6 @@ ApplicationWindow {
     readonly property color accentGreen: "#00E676"
     readonly property color accentRed: "#FF3D71"
     readonly property color accentBlue: "#00B0FF"
-    readonly property color accentOrange: "#FF9800"
     readonly property color textPrimary: "#FFFFFF"
     readonly property color textSecondary: "#9AA5B8"
 
@@ -26,7 +25,9 @@ ApplicationWindow {
         anchors.margins: 16
         spacing: 12
 
+        // ====================================================================
         // Top Header
+        // ====================================================================
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 64
@@ -51,7 +52,7 @@ ApplicationWindow {
                         font.family: "Monospace, sans-serif"
                     }
                     Text {
-                        text: "Raspberry Pi CM5 Lite  •  ThingSpeak MQTT (mqtt3.thingspeak.com)"
+                        text: "Raspberry Pi CM5 Lite  •  Mosquitto MQTT (" + (mqttClient ? mqttClient.host : "...") + ":" + (mqttClient ? mqttClient.port : 1883) + ")"
                         font.pixelSize: 12
                         color: root.textSecondary
                     }
@@ -59,7 +60,37 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
-                // Connection status badge
+                // ESP32 Hardware Status Badge
+                Rectangle {
+                    Layout.preferredHeight: 34
+                    Layout.preferredWidth: espStatusRow.width + 20
+                    radius: 17
+                    color: mqttClient && mqttClient.espOnline ? "#0E3320" : "#2A2A2E"
+                    border.color: mqttClient && mqttClient.espOnline ? root.accentGreen : "#555A64"
+                    border.width: 1
+
+                    Row {
+                        id: espStatusRow
+                        anchors.centerIn: parent
+                        spacing: 6
+
+                        Text {
+                            text: "ESP32:"
+                            font.pixelSize: 11
+                            color: root.textSecondary
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Text {
+                            text: mqttClient && mqttClient.espOnline ? "ONLINE" : "OFFLINE / UNKNOWN"
+                            font.pixelSize: 11
+                            font.bold: true
+                            color: mqttClient && mqttClient.espOnline ? root.accentGreen : "#8892A4"
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                    }
+                }
+
+                // Mosquitto Broker Connection Badge
                 Rectangle {
                     Layout.preferredHeight: 34
                     Layout.preferredWidth: statusRow.width + 24
@@ -89,7 +120,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: (mqttClient && mqttClient.isConnected) ? "CONNECTED" : "DISCONNECTED"
+                            text: (mqttClient && mqttClient.isConnected) ? "BROKER CONNECTED" : "BROKER DISCONNECTED"
                             font.pixelSize: 11
                             font.bold: true
                             color: (mqttClient && mqttClient.isConnected) ? root.accentGreen : root.accentRed
@@ -109,7 +140,7 @@ ApplicationWindow {
                         if (mqttClient.isConnected) {
                             mqttClient.disconnectFromBroker()
                         } else {
-                            if (mqttClient.clientId === "" || mqttClient.channelId === "") {
+                            if (mqttClient.host === "") {
                                 settingsDialog.open()
                             } else {
                                 mqttClient.connectToBroker()
@@ -160,7 +191,9 @@ ApplicationWindow {
             }
         }
 
-        // Center Work Area (LED Indicator + Control Buttons)
+        // ====================================================================
+        // Center Area: LED Indicator & Control Buttons
+        // ====================================================================
         Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -174,9 +207,9 @@ ApplicationWindow {
                 anchors.margins: 24
                 spacing: 32
 
-                // Left Column: LED Status Display
+                // Left Column: Physical LED State Visualizer
                 Rectangle {
-                    Layout.preferredWidth: 260
+                    Layout.preferredWidth: 280
                     Layout.fillHeight: true
                     color: "#161D27"
                     radius: 10
@@ -187,8 +220,8 @@ ApplicationWindow {
                         spacing: 16
 
                         Text {
-                            text: "ESP32 HARDWARE STATE"
-                            font.pixelSize: 12
+                            text: "ESP32 IN-BUILT LED"
+                            font.pixelSize: 13
                             font.bold: true
                             color: root.textSecondary
                             Layout.alignment: Qt.AlignHCenter
@@ -197,9 +230,9 @@ ApplicationWindow {
                         // Big Glowing LED Bulb
                         Rectangle {
                             id: ledBulb
-                            width: 110
-                            height: 110
-                            radius: 55
+                            width: 120
+                            height: 120
+                            radius: 60
                             Layout.alignment: Qt.AlignHCenter
 
                             readonly property bool isLedOn: mqttClient && mqttClient.ledState === 1
@@ -209,14 +242,14 @@ ApplicationWindow {
                             border.color: isLedOn ? "#69F0AE" : "#3B4758"
                             border.width: 3
 
-                            // Glow effect
+                            // Outer glow halo when LED is ON
                             Rectangle {
                                 anchors.centerIn: parent
-                                width: parent.width + 24
-                                height: parent.height + 24
+                                width: parent.width + 26
+                                height: parent.height + 26
                                 radius: width / 2
                                 color: "transparent"
-                                border.color: ledBulb.isLedOn ? "#3300E676" : "transparent"
+                                border.color: ledBulb.isLedOn ? "#4400E676" : "transparent"
                                 border.width: 10
                                 visible: ledBulb.isLedOn
                             }
@@ -224,15 +257,15 @@ ApplicationWindow {
                             Text {
                                 anchors.centerIn: parent
                                 text: ledBulb.isLedOn ? "ON" : (ledBulb.isLedOff ? "OFF" : "?")
-                                font.pixelSize: 26
+                                font.pixelSize: 28
                                 font.bold: true
                                 color: ledBulb.isLedOn ? "#042211" : root.textSecondary
                             }
                         }
 
                         Text {
-                            text: (mqttClient && mqttClient.ledState === 1) ? "GPIO 2: HIGH (Active)" :
-                                  ((mqttClient && mqttClient.ledState === 0) ? "GPIO 2: LOW (Inactive)" : "Waiting for state...")
+                            text: (mqttClient && mqttClient.ledState === 1) ? "GPIO 2: HIGH (Illuminated)" :
+                                  ((mqttClient && mqttClient.ledState === 0) ? "GPIO 2: LOW (Extinguished)" : "Waiting for state...")
                             font.pixelSize: 13
                             font.bold: true
                             color: (mqttClient && mqttClient.ledState === 1) ? root.accentGreen :
@@ -241,7 +274,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: "Channel: " + (mqttClient && mqttClient.channelId ? mqttClient.channelId : "<Not Set>")
+                            text: "Topic: " + (mqttClient ? mqttClient.statusTopic : "")
                             font.pixelSize: 11
                             color: "#68768A"
                             Layout.alignment: Qt.AlignHCenter
@@ -249,14 +282,14 @@ ApplicationWindow {
                     }
                 }
 
-                // Right Column: Dual Buttons (ON / OFF) & Cooldown
+                // Right Column: Dual Buttons (ON / OFF)
                 ColumnLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    spacing: 18
+                    spacing: 20
 
                     Text {
-                        text: "LED CONTROL COMMANDS"
+                        text: "HMI CONTROL ACTIONS"
                         font.pixelSize: 13
                         font.bold: true
                         color: root.textSecondary
@@ -265,15 +298,15 @@ ApplicationWindow {
                     // 2 Big Buttons Row
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 120
+                        Layout.preferredHeight: 140
                         spacing: 20
 
-                        // BUTTON 1: TURN ON
+                        // BUTTON 1: TURN ON LED
                         Button {
                             id: btnOn
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            enabled: mqttClient && mqttClient.isConnected && mqttClient.cooldownSeconds === 0
+                            enabled: mqttClient && mqttClient.isConnected
 
                             onClicked: {
                                 if (mqttClient) mqttClient.turnOnLed()
@@ -281,17 +314,17 @@ ApplicationWindow {
 
                             contentItem: ColumnLayout {
                                 anchors.centerIn: parent
-                                spacing: 6
+                                spacing: 8
 
                                 Text {
-                                    text: "⚡ TURN ON"
-                                    font.pixelSize: 20
+                                    text: "⚡ TURN ON LED"
+                                    font.pixelSize: 22
                                     font.bold: true
                                     color: btnOn.enabled ? "#FFFFFF" : "#5A6578"
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                                 Text {
-                                    text: "Publish: field1 = 1"
+                                    text: "Publish: " + (mqttClient ? mqttClient.commandTopic : "esp32/led/set") + " ➔ 'ON'"
                                     font.pixelSize: 12
                                     color: btnOn.enabled ? "#B9F6CA" : "#4A5568"
                                     Layout.alignment: Qt.AlignHCenter
@@ -299,21 +332,21 @@ ApplicationWindow {
                             }
 
                             background: Rectangle {
-                                radius: 10
+                                radius: 12
                                 color: btnOn.down ? "#00A854" : (btnOn.enabled ? "#00B359" : "#1B222E")
                                 border.color: btnOn.enabled ? root.accentGreen : "#2E3846"
                                 border.width: btnOn.enabled ? 2 : 1
 
-                                Behavior on color { ColorAnimation { duration: 150 } }
+                                Behavior on color { ColorAnimation { duration: 120 } }
                             }
                         }
 
-                        // BUTTON 2: TURN OFF
+                        // BUTTON 2: TURN OFF LED
                         Button {
                             id: btnOff
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            enabled: mqttClient && mqttClient.isConnected && mqttClient.cooldownSeconds === 0
+                            enabled: mqttClient && mqttClient.isConnected
 
                             onClicked: {
                                 if (mqttClient) mqttClient.turnOffLed()
@@ -321,17 +354,17 @@ ApplicationWindow {
 
                             contentItem: ColumnLayout {
                                 anchors.centerIn: parent
-                                spacing: 6
+                                spacing: 8
 
                                 Text {
-                                    text: "⏹ TURN OFF"
-                                    font.pixelSize: 20
+                                    text: "⏹ TURN OFF LED"
+                                    font.pixelSize: 22
                                     font.bold: true
                                     color: btnOff.enabled ? "#FFFFFF" : "#5A6578"
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                                 Text {
-                                    text: "Publish: field1 = 0"
+                                    text: "Publish: " + (mqttClient ? mqttClient.commandTopic : "esp32/led/set") + " ➔ 'OFF'"
                                     font.pixelSize: 12
                                     color: btnOff.enabled ? "#FFB4C4" : "#4A5568"
                                     Layout.alignment: Qt.AlignHCenter
@@ -339,23 +372,23 @@ ApplicationWindow {
                             }
 
                             background: Rectangle {
-                                radius: 10
+                                radius: 12
                                 color: btnOff.down ? "#C41C48" : (btnOff.enabled ? "#D81B4E" : "#1B222E")
                                 border.color: btnOff.enabled ? root.accentRed : "#2E3846"
                                 border.width: btnOff.enabled ? 2 : 1
 
-                                Behavior on color { ColorAnimation { duration: 150 } }
+                                Behavior on color { ColorAnimation { duration: 120 } }
                             }
                         }
                     }
 
-                    // Cooldown Indicator (ThingSpeak 15s Rate Limit Notice)
+                    // Mosquitto Protocol & Latency Notice
                     Rectangle {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 46
+                        Layout.preferredHeight: 52
                         radius: 8
-                        color: (mqttClient && mqttClient.cooldownSeconds > 0) ? "#2B2115" : "#161D27"
-                        border.color: (mqttClient && mqttClient.cooldownSeconds > 0) ? "#FF9800" : root.cardBorder
+                        color: "#161D27"
+                        border.color: root.cardBorder
 
                         RowLayout {
                             anchors.fill: parent
@@ -364,26 +397,21 @@ ApplicationWindow {
                             spacing: 12
 
                             Text {
-                                text: (mqttClient && mqttClient.cooldownSeconds > 0) ? "⏳" : "✓"
-                                font.pixelSize: 16
+                                text: "⚡"
+                                font.pixelSize: 18
                             }
 
                             Text {
-                                text: (mqttClient && mqttClient.cooldownSeconds > 0)
-                                      ? ("ThingSpeak Rate Limiting active: Cooldown " + mqttClient.cooldownSeconds + "s remaining")
-                                      : "Ready to transmit commands (ThingSpeak Cloud MQTT 3.1.1)"
-                                color: (mqttClient && mqttClient.cooldownSeconds > 0) ? "#FFB74D" : root.textSecondary
+                                text: "Mosquitto MQTT Local Broker  •  Sub-millisecond latency  •  No cloud limits"
+                                color: root.accentBlue
                                 font.pixelSize: 12
                                 Layout.fillWidth: true
                             }
 
-                            ProgressBar {
-                                Layout.preferredWidth: 120
-                                Layout.preferredHeight: 8
-                                visible: mqttClient && mqttClient.cooldownSeconds > 0
-                                from: 0
-                                to: 15
-                                value: mqttClient ? (15 - mqttClient.cooldownSeconds) : 0
+                            Text {
+                                text: "QoS 0 Direct"
+                                color: root.textSecondary
+                                font.pixelSize: 11
                             }
                         }
                     }
@@ -393,10 +421,12 @@ ApplicationWindow {
             }
         }
 
+        // ====================================================================
         // Bottom Status Bar
+        // ====================================================================
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 38
             color: root.cardBg
             radius: 8
             border.color: root.cardBorder
@@ -416,179 +446,157 @@ ApplicationWindow {
                 }
 
                 Text {
-                    text: mqttClient ? mqttClient.statusMessage : ""
+                    id: statusLabel
+                    text: mqttClient ? mqttClient.statusMessage : "Initializing..."
+                    color: root.textPrimary
                     font.pixelSize: 12
-                    color: (mqttClient && mqttClient.statusMessage.indexOf("Error") !== -1 ||
-                            mqttClient && mqttClient.statusMessage.indexOf("closed") !== -1) ? root.accentOrange : root.textPrimary
-                    Layout.fillWidth: true
                     elide: Text.ElideRight
-                }
-
-                Text {
-                    text: "Target: ESP32 Built-in LED"
-                    font.pixelSize: 11
-                    color: root.accentBlue
+                    Layout.fillWidth: true
                 }
             }
         }
     }
 
+    // ========================================================================
     // Settings Dialog
+    // ========================================================================
     Dialog {
         id: settingsDialog
-        title: "ThingSpeak MQTT Configuration"
-        modal: true
+        title: "Mosquitto MQTT Configuration"
         anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 600)
-        standardButtons: Dialog.Save | Dialog.Cancel
-
-        onAccepted: {
-            if (!mqttClient) return
-            mqttClient.host = txtHost.text.trim()
-            mqttClient.port = parseInt(txtPort.text.trim()) || 1883
-            mqttClient.channelId = txtChannelId.text.trim()
-            mqttClient.clientId = txtClientId.text.trim()
-            mqttClient.username = txtUsername.text.trim()
-            mqttClient.password = txtPassword.text.trim()
-            mqttClient.writeApiKey = txtWriteApiKey.text.trim()
-            mqttClient.subscribeFeedback = chkFeedback.checked
-            mqttClient.autoReconnect = chkAutoReconnect.checked
-            mqttClient.saveSettings()
-        }
+        width: 480
+        modal: true
+        focus: true
 
         background: Rectangle {
-            color: "#18202C"
+            color: "#1E2633"
             radius: 12
             border.color: root.cardBorder
-            border.width: 2
+            border.width: 1
+        }
+
+        header: Rectangle {
+            height: 48
+            color: "#161D27"
+            radius: 12
+
+            Text {
+                anchors.centerIn: parent
+                text: "Mosquitto MQTT Connection Settings"
+                color: root.textPrimary
+                font.bold: true
+                font.pixelSize: 14
+            }
         }
 
         contentItem: ColumnLayout {
-            spacing: 10
+            spacing: 12
 
-            // Crucial Warning Banner regarding MQTT Client IDs
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 52
-                radius: 6
-                color: "#2C1B14"
-                border.color: "#FF9800"
-                border.width: 1
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 8
-                    spacing: 8
-                    Text { text: "⚠️"; font.pixelSize: 18 }
-                    Text {
-                        text: "IMPORTANT: Do NOT use the ESP32's Client ID here! In ThingSpeak (Devices -> MQTT), create a 2nd device for this HMI. Sharing the same Client ID kicks both devices offline."
-                        font.pixelSize: 11
-                        color: "#FFCC80"
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                }
+            Text {
+                text: "Mosquitto Broker Host / IP (e.g. Ubuntu PC IP or localhost):"
+                color: root.textSecondary
+                font.pixelSize: 11
             }
-
-            GridLayout {
-                columns: 2
-                rowSpacing: 8
-                columnSpacing: 12
+            TextField {
+                id: txtHost
                 Layout.fillWidth: true
-
-                Text { text: "Broker Host:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtHost
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.host : "mqtt3.thingspeak.com"
-                    placeholderText: "mqtt3.thingspeak.com"
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "Broker Port:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtPort
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.port.toString() : "1883"
-                    placeholderText: "1883 (plain) or 8883 (TLS)"
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "Channel ID:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtChannelId
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.channelId : ""
-                    placeholderText: "e.g. 3564388"
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "HMI Client ID:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtClientId
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.clientId : ""
-                    placeholderText: "Device 2 Client ID (must differ from ESP32)"
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "HMI Username:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtUsername
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.username : ""
-                    placeholderText: "Device 2 Username"
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "HMI Password:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtPassword
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.password : ""
-                    placeholderText: "Device 2 Password"
-                    echoMode: TextInput.Password
-                    color: "#FFFFFF"
-                }
-
-                Text { text: "Write API Key:"; color: root.textSecondary; font.pixelSize: 12 }
-                TextField {
-                    id: txtWriteApiKey
-                    Layout.fillWidth: true
-                    text: mqttClient ? mqttClient.writeApiKey : ""
-                    placeholderText: "Channel Write API Key (Optional fallback)"
-                    echoMode: TextInput.Password
-                    color: "#FFFFFF"
+                text: mqttClient ? mqttClient.host : "192.168.1.100"
+                color: root.textPrimary
+                background: Rectangle {
+                    color: "#161D27"
+                    radius: 6
+                    border.color: root.cardBorder
                 }
             }
 
             RowLayout {
-                spacing: 16
+                spacing: 12
+                Layout.fillWidth: true
 
-                CheckBox {
-                    id: chkFeedback
-                    text: "Subscribe for live state confirmation"
-                    checked: mqttClient ? mqttClient.subscribeFeedback : false
-                    contentItem: Text {
-                        text: chkFeedback.text
-                        color: root.textSecondary
-                        font.pixelSize: 11
-                        leftPadding: chkFeedback.indicator.width + 6
-                        verticalAlignment: Text.AlignVCenter
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Port:"; color: root.textSecondary; font.pixelSize: 11 }
+                    TextField {
+                        id: txtPort
+                        Layout.fillWidth: true
+                        text: mqttClient ? String(mqttClient.port) : "1883"
+                        color: root.textPrimary
+                        background: Rectangle { color: "#161D27"; radius: 6; border.color: root.cardBorder }
                     }
                 }
 
-                CheckBox {
-                    id: chkAutoReconnect
-                    text: "Auto-reconnect on drop"
-                    checked: mqttClient ? mqttClient.autoReconnect : true
-                    contentItem: Text {
-                        text: chkAutoReconnect.text
-                        color: root.textSecondary
-                        font.pixelSize: 11
-                        leftPadding: chkAutoReconnect.indicator.width + 6
-                        verticalAlignment: Text.AlignVCenter
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Client ID:"; color: root.textSecondary; font.pixelSize: 11 }
+                    TextField {
+                        id: txtClientId
+                        Layout.fillWidth: true
+                        text: mqttClient ? mqttClient.clientId : "rpi_cm5_hmi"
+                        color: root.textPrimary
+                        background: Rectangle { color: "#161D27"; radius: 6; border.color: root.cardBorder }
                     }
+                }
+            }
+
+            Text {
+                text: "Command Topic (Publish):"
+                color: root.textSecondary
+                font.pixelSize: 11
+            }
+            TextField {
+                id: txtCommandTopic
+                Layout.fillWidth: true
+                text: mqttClient ? mqttClient.commandTopic : "esp32/led/set"
+                color: root.textPrimary
+                background: Rectangle { color: "#161D27"; radius: 6; border.color: root.cardBorder }
+            }
+
+            Text {
+                text: "Status Topic (Subscribe feedback):"
+                color: root.textSecondary
+                font.pixelSize: 11
+            }
+            TextField {
+                id: txtStatusTopic
+                Layout.fillWidth: true
+                text: mqttClient ? mqttClient.statusTopic : "esp32/led/status"
+                color: root.textPrimary
+                background: Rectangle { color: "#161D27"; radius: 6; border.color: root.cardBorder }
+            }
+        }
+
+        footer: DialogButtonBox {
+            background: Rectangle { color: "transparent" }
+
+            Button {
+                text: "Cancel"
+                DialogButtonBox.buttonRole: DialogButtonBox.RejectRole
+                onClicked: settingsDialog.close()
+                contentItem: Text { text: "Cancel"; color: root.textSecondary; horizontalAlignment: Text.AlignHCenter }
+                background: Rectangle { color: "#2A3649"; radius: 6 }
+            }
+
+            Button {
+                text: "Save & Connect"
+                DialogButtonBox.buttonRole: DialogButtonBox.AcceptRole
+                contentItem: Text { text: "Save & Connect"; color: "#FFFFFF"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
+                background: Rectangle { color: "#1B4D3E"; radius: 6; border.color: root.accentGreen }
+
+                onClicked: {
+                    if (mqttClient) {
+                        mqttClient.host = txtHost.text.trim()
+                        mqttClient.port = parseInt(txtPort.text.trim()) || 1883
+                        mqttClient.clientId = txtClientId.text.trim()
+                        mqttClient.commandTopic = txtCommandTopic.text.trim()
+                        mqttClient.statusTopic = txtStatusTopic.text.trim()
+                        mqttClient.saveSettings()
+
+                        if (mqttClient.isConnected) {
+                            mqttClient.disconnectFromBroker()
+                        }
+                        mqttClient.connectToBroker()
+                    }
+                    settingsDialog.close()
                 }
             }
         }
