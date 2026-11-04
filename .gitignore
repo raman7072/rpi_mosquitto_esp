@@ -1,0 +1,23 @@
+# Build directories
+build/
+bin/
+*.o
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# PlatformIO
+.pio/
+.vscode/
+
+# Qt Creator / IDE files
+*.user
+*.user.*
+
