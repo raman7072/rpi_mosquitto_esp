@@ -6,8 +6,6 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONF_FILE="$SCRIPT_DIR/mosquitto.conf"
 
-mkdir -p /tmp/mosquitto_data/
-
 # Check if mosquitto is installed
 if ! command -v mosquitto &> /dev/null; then
     echo "[ERROR] Mosquitto is not installed."
