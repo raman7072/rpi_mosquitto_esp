@@ -5,7 +5,7 @@
 
 MqttClient::MqttClient(QObject *parent)
     : QObject(parent)
-    , m_host("192.168.1.100")
+    , m_host("192.168.1.68")
     , m_port(1883)
     , m_clientId("")
     , m_username("")

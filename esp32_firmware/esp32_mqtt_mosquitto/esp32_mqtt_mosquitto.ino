@@ -34,15 +34,15 @@
 // ==================================================================================
 // 1. Wi-Fi Configuration (2.4 GHz network)
 // ==================================================================================
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";       // <--- Replace with your Wi-Fi SSID
-const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";   // <--- Replace with your Wi-Fi Password
+const char* WIFI_SSID     = "Room_302_40040A";       // <--- Replace with your Wi-Fi SSID
+const char* WIFI_PASSWORD = "Room@302";   // <--- Replace with your Wi-Fi Password
 
 // ==================================================================================
 // 2. Mosquitto MQTT Broker Configuration (Ubuntu PC or Raspberry Pi IP)
 // ==================================================================================
 // Set this to your Ubuntu PC's LAN IP (run `hostname -I` or `ip a` on Ubuntu)
 // e.g., "192.168.1.50"
-const char* MQTT_BROKER   = "192.168.1.100";        // <--- Replace with Ubuntu PC IP
+const char* MQTT_BROKER   = "192.168.1.68";        // <--- Replace with Ubuntu PC IP
 const int   MQTT_PORT     = 1883;                   // Default Mosquitto port
 
 // Unique Client ID for ESP32 (MUST be different from Raspberry Pi HMI Client ID)
@@ -245,3 +245,4 @@ void loop() {
     mqttClient.loop();
   }
 }
+
